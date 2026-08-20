@@ -27,6 +27,13 @@ public sealed class FileDownloadService : IFileDownloadService
                 "DownloadSettings:RootPath wurde nicht konfiguriert.");
         }
 
+        if (settings.AllowedExtensions is null ||
+            settings.AllowedExtensions.Length == 0)
+        {
+            throw new InvalidOperationException(
+                "Es wurden keine erlaubten Dateiendungen konfiguriert.");
+        }
+
         _rootPath = Path.GetFullPath(settings.RootPath);
 
         _rootPathWithSeparator =
@@ -44,7 +51,7 @@ public sealed class FileDownloadService : IFileDownloadService
         if (_allowedExtensions.Count == 0)
         {
             throw new InvalidOperationException(
-                "Es wurden keine erlaubten Dateiendungen konfiguriert.");
+                "Es wurden keine gültigen Dateiendungen konfiguriert.");
         }
 
         _contentTypeProvider =
@@ -71,7 +78,7 @@ public sealed class FileDownloadService : IFileDownloadService
                     _rootPath,
                     "*",
                     SearchOption.TopDirectoryOnly)
-                .Where(IsAllowedFile)
+                .Where(HasAllowedExtension)
                 .Select(CreateViewModel)
                 .OrderBy(
                     file => file.Name,
@@ -128,8 +135,8 @@ public sealed class FileDownloadService : IFileDownloadService
         if (fullPath is null)
         {
             _logger.LogWarning(
-                "Der angeforderte Dateipfad liegt außerhalb " +
-                "des Downloadordners: {FileName}",
+                "Der Dateipfad liegt außerhalb des Downloadordners: " +
+                "{FileName}",
                 fileName);
 
             return null;
@@ -139,20 +146,14 @@ public sealed class FileDownloadService : IFileDownloadService
         {
             if (!File.Exists(fullPath))
             {
-                _logger.LogInformation(
-                    "Die angeforderte Datei wurde nicht gefunden: {FileName}",
-                    fileName);
-
                 return null;
             }
-
-            var contentType = GetContentType(fullPath);
 
             return new DownloadFile
             {
                 FullPath = fullPath,
                 FileName = fileName,
-                ContentType = contentType
+                ContentType = GetContentType(fullPath)
             };
         }
         catch (UnauthorizedAccessException exception)
@@ -175,7 +176,8 @@ public sealed class FileDownloadService : IFileDownloadService
         }
     }
 
-    private DownloadFileViewModel CreateViewModel(string path)
+    private static DownloadFileViewModel CreateViewModel(
+        string path)
     {
         var fileInfo = new FileInfo(path);
 
@@ -187,25 +189,25 @@ public sealed class FileDownloadService : IFileDownloadService
         };
     }
 
-    private bool IsAllowedFile(string path)
-    {
-        return HasAllowedExtension(path);
-    }
-
     private bool HasAllowedExtension(string path)
     {
         var extension = Path.GetExtension(path);
 
-        return !string.IsNullOrWhiteSpace(extension)
-               && _allowedExtensions.Contains(extension);
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            return false;
+        }
+
+        return _allowedExtensions.Contains(extension);
     }
 
     private static bool IsSafeFileName(string fileName)
     {
-        var safeFileName = Path.GetFileName(fileName);
+        var extractedFileName =
+            Path.GetFileName(fileName);
 
         return string.Equals(
-            safeFileName,
+            extractedFileName,
             fileName,
             StringComparison.Ordinal);
     }
@@ -216,7 +218,8 @@ public sealed class FileDownloadService : IFileDownloadService
             _rootPath,
             fileName);
 
-        var fullPath = Path.GetFullPath(combinedPath);
+        var fullPath =
+            Path.GetFullPath(combinedPath);
 
         if (!fullPath.StartsWith(
                 _rootPathWithSeparator,
@@ -240,7 +243,8 @@ public sealed class FileDownloadService : IFileDownloadService
         return "application/octet-stream";
     }
 
-    private static string NormalizeExtension(string extension)
+    private static string NormalizeExtension(
+        string extension)
     {
         var normalizedExtension =
             extension.Trim();
@@ -251,6 +255,6 @@ public sealed class FileDownloadService : IFileDownloadService
                 $".{normalizedExtension}";
         }
 
-        return normalizedExtension;
+        return normalizedExtension.ToLowerInvariant();
     }
 }

@@ -57,15 +57,23 @@ public sealed class FileDownloadServiceTests : IDisposable
             "Geheimdatei.txt",
             "Disallowed content");
 
-        var service = CreateService();
+        var service = CreateService(
+            allowedExtensions:
+            [
+                ".msi"
+            ]);
 
         var files = service.GetFiles();
 
-        Assert.Single(files);
+        var file = Assert.Single(files);
 
         Assert.Equal(
             "OpenVPN-Installer.msi",
-            files[0].Name);
+            file.Name);
+
+        Assert.DoesNotContain(
+            files,
+            item => item.Name == "Geheimdatei.txt");
     }
 
     [Fact]
@@ -160,7 +168,11 @@ public sealed class FileDownloadServiceTests : IDisposable
             "NichtErlaubt.txt",
             "Text content");
 
-        var service = CreateService();
+        var service = CreateService(
+            allowedExtensions:
+            [
+                ".msi"
+            ]);
 
         var result = service.GetFile(
             "NichtErlaubt.txt");
