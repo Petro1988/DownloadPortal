@@ -1,0 +1,59 @@
+﻿@model DownloadPortal.Models.DownloadIndexViewModel
+
+@{
+    ViewData["Title"] = "Download";
+}
+
+<div class="container py-5">
+    <div class="mb-4">
+        <h1>Download</h1>
+
+        <p class="text-muted">
+            Wählen Sie die benötigte Datei aus.
+        </p>
+    </div>
+
+    @if (!Model.HasFiles)
+    {
+        <div class="alert alert-info">
+            Aktuell sind keine Download-Dateien verfügbar.
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Datei</th>
+                        <th>Größe</th>
+                        <th>Geändert</th>
+                        <th></th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    @foreach (var file in Model.Files)
+                    {
+                        <tr>
+                            <td>@file.Name</td>
+
+                            <td>@file.FormattedSize</td>
+
+                            <td>@file.FormattedLastModified</td>
+
+                            <td class="text-end">
+                                <a class="btn btn-primary"
+                                   asp-controller="Home"
+                                   asp-action="Download"
+                                   asp-route-fileName="@file.Name">
+                                    Herunterladen
+                                </a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
