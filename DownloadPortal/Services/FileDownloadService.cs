@@ -1,6 +1,6 @@
 ﻿using DownloadPortal.Models;
-using DownloadPortal.Services;
 using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.Extensions.Options;
 
 namespace DownloadPortal.Services;
 
@@ -8,42 +8,26 @@ public sealed class FileDownloadService : IFileDownloadService
 {
     private readonly string _rootPath;
     private readonly string _rootPathWithSeparator;
-    private readonly ILogger<FileDownloadService> _logger;
-    private readonly FileExtensionContentTypeProvider _contentTypeProvider;
     private readonly HashSet<string> _allowedExtensions;
+    private readonly FileExtensionContentTypeProvider _contentTypeProvider;
+    private readonly ILogger<FileDownloadService> _logger;
 
     public FileDownloadService(
-    IConfiguration configuration,
-    ILogger<FileDownloadService> logger)
+        IOptions<DownloadSettings> options,
+        ILogger<FileDownloadService> logger)
     {
-        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
-        var configuredRootPath =
-            configuration["DownloadSettings:RootPath"];
+        var settings = options.Value;
 
-        if (string.IsNullOrWhiteSpace(configuredRootPath))
+        if (string.IsNullOrWhiteSpace(settings.RootPath))
         {
             throw new InvalidOperationException(
                 "DownloadSettings:RootPath wurde nicht konfiguriert.");
         }
 
-        var configuredExtensions = configuration
-            .GetSection("DownloadSettings:AllowedExtensions")
-            .Get<string[]>();
-
-        if (configuredExtensions is null ||
-            configuredExtensions.Length == 0)
-        {
-            throw new InvalidOperationException(
-                "Es wurden keine erlaubten Dateitypen konfiguriert.");
-        }
-
-        _allowedExtensions = new HashSet<string>(
-            configuredExtensions,
-            StringComparer.OrdinalIgnoreCase);
-
-        _rootPath = Path.GetFullPath(configuredRootPath);
+        _rootPath = Path.GetFullPath(settings.RootPath);
 
         _rootPathWithSeparator =
             _rootPath.TrimEnd(
@@ -51,9 +35,22 @@ public sealed class FileDownloadService : IFileDownloadService
                 Path.AltDirectorySeparatorChar)
             + Path.DirectorySeparatorChar;
 
-        _logger = logger;
+        _allowedExtensions = settings.AllowedExtensions
+            .Where(extension =>
+                !string.IsNullOrWhiteSpace(extension))
+            .Select(NormalizeExtension)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (_allowedExtensions.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "Es wurden keine erlaubten Dateiendungen konfiguriert.");
+        }
+
         _contentTypeProvider =
             new FileExtensionContentTypeProvider();
+
+        _logger = logger;
     }
 
     public IReadOnlyList<DownloadFileViewModel> GetFiles()
@@ -75,17 +72,7 @@ public sealed class FileDownloadService : IFileDownloadService
                     "*",
                     SearchOption.TopDirectoryOnly)
                 .Where(IsAllowedFile)
-                .Select(path =>
-                {
-                    var fileInfo = new FileInfo(path);
-
-                    return new DownloadFileViewModel
-                    {
-                        Name = fileInfo.Name,
-                        SizeInBytes = fileInfo.Length,
-                        LastModifiedUtc = fileInfo.LastWriteTimeUtc
-                    };
-                })
+                .Select(CreateViewModel)
                 .OrderBy(
                     file => file.Name,
                     StringComparer.OrdinalIgnoreCase)
@@ -118,12 +105,7 @@ public sealed class FileDownloadService : IFileDownloadService
             return null;
         }
 
-        var safeFileName = Path.GetFileName(fileName);
-
-        if (!string.Equals(
-                safeFileName,
-                fileName,
-                StringComparison.Ordinal))
+        if (!IsSafeFileName(fileName))
         {
             _logger.LogWarning(
                 "Ein ungültiger Dateiname wurde angefordert: {FileName}",
@@ -132,55 +114,143 @@ public sealed class FileDownloadService : IFileDownloadService
             return null;
         }
 
-        var extension = Path.GetExtension(safeFileName);
-
-        if (!_allowedExtensions.Contains(extension))
+        if (!HasAllowedExtension(fileName))
         {
             _logger.LogWarning(
                 "Der Dateityp von {FileName} ist nicht freigegeben.",
-                safeFileName);
+                fileName);
 
             return null;
         }
 
-        var fullPath = Path.GetFullPath(
-            Path.Combine(_rootPath, safeFileName));
+        var fullPath = GetFullFilePath(fileName);
 
-        if (!fullPath.StartsWith(
-                _rootPathWithSeparator,
-                StringComparison.OrdinalIgnoreCase))
+        if (fullPath is null)
         {
             _logger.LogWarning(
                 "Der angeforderte Dateipfad liegt außerhalb " +
-                "des Downloadordners.");
+                "des Downloadordners: {FileName}",
+                fileName);
 
             return null;
         }
 
-        if (!System.IO.File.Exists(fullPath))
+        try
         {
+            if (!File.Exists(fullPath))
+            {
+                _logger.LogInformation(
+                    "Die angeforderte Datei wurde nicht gefunden: {FileName}",
+                    fileName);
+
+                return null;
+            }
+
+            var contentType = GetContentType(fullPath);
+
+            return new DownloadFile
+            {
+                FullPath = fullPath,
+                FileName = fileName,
+                ContentType = contentType
+            };
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            _logger.LogError(
+                exception,
+                "Kein Zugriff auf die Datei {FileName}.",
+                fileName);
+
             return null;
         }
-
-        if (!_contentTypeProvider.TryGetContentType(
-                fullPath,
-                out var contentType))
+        catch (IOException exception)
         {
-            contentType = "application/octet-stream";
+            _logger.LogError(
+                exception,
+                "Die Datei {FileName} konnte nicht gelesen werden.",
+                fileName);
+
+            return null;
         }
+    }
 
-        return new DownloadFile
+    private DownloadFileViewModel CreateViewModel(string path)
+    {
+        var fileInfo = new FileInfo(path);
+
+        return new DownloadFileViewModel
         {
-            FullPath = fullPath,
-            FileName = safeFileName,
-            ContentType = contentType
+            Name = fileInfo.Name,
+            SizeInBytes = fileInfo.Length,
+            LastModifiedUtc = fileInfo.LastWriteTimeUtc
         };
     }
 
     private bool IsAllowedFile(string path)
     {
+        return HasAllowedExtension(path);
+    }
+
+    private bool HasAllowedExtension(string path)
+    {
         var extension = Path.GetExtension(path);
 
-        return _allowedExtensions.Contains(extension);
+        return !string.IsNullOrWhiteSpace(extension)
+               && _allowedExtensions.Contains(extension);
+    }
+
+    private static bool IsSafeFileName(string fileName)
+    {
+        var safeFileName = Path.GetFileName(fileName);
+
+        return string.Equals(
+            safeFileName,
+            fileName,
+            StringComparison.Ordinal);
+    }
+
+    private string? GetFullFilePath(string fileName)
+    {
+        var combinedPath = Path.Combine(
+            _rootPath,
+            fileName);
+
+        var fullPath = Path.GetFullPath(combinedPath);
+
+        if (!fullPath.StartsWith(
+                _rootPathWithSeparator,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return fullPath;
+    }
+
+    private string GetContentType(string fullPath)
+    {
+        if (_contentTypeProvider.TryGetContentType(
+                fullPath,
+                out var contentType))
+        {
+            return contentType;
+        }
+
+        return "application/octet-stream";
+    }
+
+    private static string NormalizeExtension(string extension)
+    {
+        var normalizedExtension =
+            extension.Trim();
+
+        if (!normalizedExtension.StartsWith('.'))
+        {
+            normalizedExtension =
+                $".{normalizedExtension}";
+        }
+
+        return normalizedExtension;
     }
 }
