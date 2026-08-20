@@ -4,56 +4,132 @@
     ViewData["Title"] = "Download";
 }
 
-<div class="container py-5">
-    <div class="mb-4">
-        <h1>Download</h1>
+<section class="download-hero">
+    <div class="download-hero-content">
+        <div class="download-hero-icon" aria-hidden="true">
+            ↓
+        </div>
 
-        <p class="text-muted">
-            Wählen Sie die benötigte Datei aus.
-        </p>
+        <div>
+            <span class="download-badge">
+                Geschützter Bereich
+            </span>
+
+            <h1>Download</h1>
+
+            <p>
+                Hier können Sie die benötigten Dateien für die
+                Einrichtung des DMS-Zugangs herunterladen.
+            </p>
+        </div>
+    </div>
+</section>
+
+<section class="download-section">
+    <div class="download-panel">
+        <div class="download-panel-header">
+            <div>
+                <h2>Verfügbare Dateien</h2>
+
+                <p>
+                    Wählen Sie die benötigte Datei aus.
+                </p>
+            </div>
+
+            <span class="file-count">
+                @Model.Files.Count Datei(en)
+            </span>
+        </div>
+
+        @if (!Model.HasFiles)
+        {
+            <div class="empty-state">
+                <div class="empty-state-icon" aria-hidden="true">
+                    ↓
+                </div>
+
+                <h3>Keine Dateien verfügbar</h3>
+
+                <p>
+                    Im Downloadbereich befinden sich momentan
+                    keine freigegebenen Dateien.
+                </p>
+            </div>
+        }
+        else
+        {
+            <div class="file-list">
+                @foreach (var file in Model.Files)
+                {
+                    <article class="file-item">
+                        <div class="file-type" aria-hidden="true">
+                            @GetFileLabel(file.Name)
+                        </div>
+
+                        <div class="file-information">
+                            <h3>@file.Name</h3>
+
+                            <div class="file-meta">
+                                <span>@file.FormattedSize</span>
+                                <span class="file-meta-separator">•</span>
+                                <span>
+                                    Geändert:
+                                    @file.FormattedLastModified
+                                </span>
+                            </div>
+
+                            <p>
+                                Bereitgestellte Datei zum Herunterladen.
+                            </p>
+                        </div>
+
+                        <div class="file-action">
+                            <a class="download-button"
+                               asp-controller="Home"
+                               asp-action="Download"
+                               asp-route-fileName="@file.Name">
+
+                                <span aria-hidden="true">↓</span>
+                                <span>Herunterladen</span>
+                            </a>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
     </div>
 
-    @if (!Model.HasFiles)
-    {
-        <div class="alert alert-info">
-            Aktuell sind keine Download-Dateien verfügbar.
+    <div class="security-notice">
+        <span class="security-notice-icon" aria-hidden="true">
+            ✓
+        </span>
+
+        <div>
+            <strong>Sicherer Download</strong>
+
+            <p>
+                Die Dateien werden über eine verschlüsselte
+                HTTPS-Verbindung bereitgestellt.
+            </p>
         </div>
-    }
-    else
+    </div>
+</section>
+
+@functions
+{
+    private static string GetFileLabel(string fileName)
     {
-        <div class="table-responsive">
-            <table class="table table-hover align-middle">
-                <thead>
-                    <tr>
-                        <th>Datei</th>
-                        <th>Größe</th>
-                        <th>Geändert</th>
-                        <th></th>
-                    </tr>
-                </thead>
+        var extension =
+            System.IO.Path.GetExtension(fileName);
 
-                <tbody>
-                    @foreach (var file in Model.Files)
-                    {
-                        <tr>
-                            <td>@file.Name</td>
-
-                            <td>@file.FormattedSize</td>
-
-                            <td>@file.FormattedLastModified</td>
-
-                            <td class="text-end">
-                                <a class="btn btn-primary"
-                                   asp-controller="Home"
-                                   asp-action="Download"
-                                   asp-route-fileName="@file.Name">
-                                    Herunterladen
-                                </a>
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
+        return extension.ToUpperInvariant() switch
+        {
+            ".MSI" => "MSI",
+            ".EXE" => "EXE",
+            ".ZIP" => "ZIP",
+            ".OVPN" => "VPN",
+            ".PDF" => "PDF",
+            _ => "FILE"
+        };
     }
-</div>
+}
